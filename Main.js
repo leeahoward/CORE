@@ -43,7 +43,6 @@ plugins.loadPlugins();
 
 // Set variables for the server(s)
 var current = 150;
-var dir = ".";
 var files = "";
 var usingfallback = false;
 var completelog = "";
@@ -91,7 +90,8 @@ try {
     var PORT = serverOptions['port'];
     var mcport = serverOptions['minecraft_port'];
     var jardir = serverOptions['jarfile_directory'];
-    var jarfile = jardir + serverOptions['jar'] + '.' + serverOptions['version'] + '.jar';
+    var jarfile = jardir + '/' + serverOptions['jar'] + '.' + serverOptions['version'] + '.jar';
+    var minecraft_home= serverOptions['minecraft_home'];
     usingfallback = false;
 } catch (e) { // Fallback options
     console.log(e);
@@ -121,7 +121,7 @@ app.use(require('body-parser').urlencoded({
  * Access logging
  */
 
-var logDirectory = dir + '/nmc_logs'
+var logDirectory = minecraft_home + '/nmc_logs'
 
 // ensure log directory exists
 fs.existsSync(logDirectory) || fs.mkdirSync(logDirectory)
@@ -134,6 +134,7 @@ var accessLogStream = FileStreamRotator.getStream({
     date_format: "YYYY-MM-DD"
 })
 
+console.log('use morgan');
 app.use(morgan('common', {
     skip: function(req, res) {
         return req.path == "/log" || req.path == "/serverup"
@@ -147,12 +148,17 @@ app.use(morgan('common', {
 // console.log(plugins.pluginList()); // List plugins
 // ---
 
+console.log('define getServerProps');
 function getServerProps(force) {
+    force=true;
     if (!force || (typeof srvprp !== "undefined" && srvprp !== null)) {
+        console.log("server properties not loaded");
         return srvprp;
     } else {
         try {
-            srvprp = pr("server.properties");
+            srvprp = pr(minecraft_home + "/server.properties");
+            console.log("server properties loaded");
+            //console.log(srvprp);
         } catch (e) {
             console.log(e);
             srvprp = null;
@@ -170,6 +176,7 @@ function checkAPIKey(key) {
 }
 
 function checkVersion() { // Check for updates
+    console.log("check version");
     getfile.get('https://raw.githubusercontent.com/NodeMC/NodeMC-CORE/master/version.txt', function(error, response, body) {
         if (!error && response.statusCode == 200) {
             var version = body;
@@ -200,38 +207,39 @@ function restartserver() { // Restarting the server
 }
 
 function setport() { // Enforcing server properties set by host
+    console.log('setport');
     //console.log(oldport);
     //console.log(mcport);
     try {
         var props = getServerProps(); // Get the original properties
         if (props !== null) {
-            var props = getServerProps(); // Get the original properties
+            //var props = getServerProps(); // Get the original properties
             if ((typeof props !== "undefined") && (props !== null)) {
                 var oldport = props.get('server-port');
                 // Here we set any minecraft server properties we need
-                fs.readFile('server.properties', 'utf8', function(err, data) {
+                fs.readFile(minecraft_home + '/server.properties', 'utf8', function(err, data) {
                     if (err) {
                         return console.log(err);
                     }
                     var result = data.replace('server-port=' + oldport, 'server-port=' + mcport);
 
-                    fs.writeFile('server.properties', result, 'utf8', function(err) {
+                    fs.writeFile(minecraft_home + '/server.properties', result, 'utf8', function(err) {
                         if (err) return console.log(err);
                     });
                 });
-                props = pr('server.properties'); // Get the new properties
+                props = pr(minecraft_home + '/server.properties'); // Get the new properties
                 //console.log(oldport);
             } else {
                 console.log("Failed to get the server properties!");
             }
 
-            fs.readFile('eula.txt', 'utf8', function(err, data) {
+            fs.readFile(minecraft_home + '/eula.txt', 'utf8', function(err, data) {
                 if (err) {
                     return console.log(err);
                 }
                 var result = data.replace('eula=false', 'eula=true');
 
-                fs.writeFile('eula.txt', result, 'utf8', function(err) {
+                fs.writeFile(minecraft_home + '/eula.txt', result, 'utf8', function(err) {
                     if (err) return console.log(err);
                 });
             });
@@ -249,6 +257,9 @@ getIP(function(err, ip) { // Get external IP for server
 });
 
 function startServer() { // Start server process
+    console.log("start minecraft");
+    console.log({jarfile:jarfile});
+    console.log({minecraft_home:minecraft_home});
     serverStopped = false;
     serverSpawnProcess = spawn('java', [
         '-Xmx' + ram,
@@ -256,7 +267,10 @@ function startServer() { // Start server process
         '-jar',
         jarfile,
         'nogui'
-    ]);
+    ],{
+        cwd:minecraft_home
+    }
+    );
     serverSpawnProcess.stdout.on('data', log);
     serverSpawnProcess.stderr.on('data', log);
     serverSpawnProcess.on('exit', function(code) {
@@ -269,30 +283,36 @@ function startServer() { // Start server process
 
 function log(data) { // Log (dump) server output to variable
     //  Technically uneeded, useful for debugging
-    //process.stdout.write(data.toString());
+    process.stdout.write(data.toString());
     completelog = completelog + data.toString();
 }
 // ---
 
+console.log('setup server options');
 if (serverOptions != null && !serverOptions.firstrun) {
     // Start then restart server for things to take effect
     //checkVersion();
     console.log("Starting server...");
     startServer();
+    console.log("set port...");
     setport();
+    console.log("restart...");
     restartserver();
     console.log("Server running at localhost:" + PORT);
     console.log("API Key: " + apikey);
     if (usingfallback == true) {
         console.log("Using fallback options! Check your properties.json.")
     }
+    console.log("not first run.. done with first run check");
     // ---
-} else {}
+} else { 
+}
 
 // App post/get request handlers (API)
 //------------------------------------
 
-app.get('/plugin/:ref/:route', function(request, response) {
+app.get('get:/plugin/:ref/:route', function(request, response) {
+    console.log("/plugin/:ref/:route");
     var ref = request.params.ref;
     var route = request.params.route;
     try {
@@ -309,6 +329,7 @@ app.get('/plugin/:ref/:route', function(request, response) {
 });
 
 app.post('/plugin/:ref/:route', function(request, response) {
+    console.log("post:/plugin/:ref/:route");
     var ref = request.params.ref;
     var route = request.params.route;
     var args = request.body.args;
@@ -328,17 +349,18 @@ app.post('/plugin/:ref/:route', function(request, response) {
 
 app.get('/download/:file', function(request, response) {
     var options = {
-        root: './',
+        root: minecraft_home,
         dotfiles: 'deny',
         headers: {
             'x-timestamp': Date.now(),
             'x-sent': true
         }
     };
-    var file = querystring.unescape(request.params.file);
+    var file = minecraft_home + '/' + querystring.unescape(request.params.file);
+    console.log({filerequested:file});
     if (file !== "server_files/properties.json") {
         if (!fs.lstatSync(file).isDirectory()) {
-            fs.readFile("./" + file, {
+            fs.readFile(file, {
                 encoding: 'utf-8'
             }, function(err, data) {
                 if (!err) {
@@ -349,7 +371,7 @@ app.get('/download/:file', function(request, response) {
 
             });
         } else {
-            fs.readdir(dir + '/' + file, function(err, items) {
+            fs.readdir(file, function(err, items) {
 
             });
         }
@@ -370,6 +392,7 @@ app.post('/fr_setup', function(request, response) {
             'jarfile_directory': request.body.directory + "/", // Does not seem to matter if there is an extra '/'
             'jar': request.body.flavour,
             'version': request.body.version,
+            'minecraft_home': request.body.minecraft_home,
             'firstrun': false
         }
 
@@ -462,7 +485,7 @@ app.get('/log', function(request, response) { // Get server log
 });
 
 app.get('/files', function(request, response) { // Get server file
-    fs.readdir(dir + '/', function(err, items) {
+    fs.readdir(minecraft_home + '/', function(err, items) {
         files = items;
         response.send(JSON.stringify({
             files
@@ -472,9 +495,9 @@ app.get('/files', function(request, response) { // Get server file
 
 app.post('/files', function(request, response) { // Return contents of a file
     if (checkAPIKey(request.param('apikey')) == true) {
-        var file = request.body.Body;
+        var file = minecraft_home + '/' + request.body.Body;
         if (!fs.lstatSync(file).isDirectory()) {
-            fs.readFile("./" + file, {
+            fs.readFile(file, {
                 encoding: 'utf-8'
             }, function(err, data) {
                 if (!err) {
@@ -485,7 +508,7 @@ app.post('/files', function(request, response) { // Return contents of a file
 
             });
         } else {
-            fs.readdir(dir + '/' + file, function(err, items) {
+            fs.readdir(file, function(err, items) {
                 files = items;
                 response.send(JSON.stringify({
                     "isdirectory": "true",
@@ -501,9 +524,10 @@ app.post('/files', function(request, response) { // Return contents of a file
 app.post('/savefile', function(request, response) { // Save a POST'd file
     if (checkAPIKey(request.param('apikey')) == true) {
         var file = request.param('File');
+        var file = minecraft_home + '/' + request.param('File');
         var newcontents = request.param('Contents');
 
-        fs.writeFile(dir + "/" + file, newcontents, function(err) {
+        fs.writeFile(file, newcontents, function(err) {
             if (err) {
                 return console.log(err);
             } else {
@@ -517,9 +541,10 @@ app.post('/savefile', function(request, response) { // Save a POST'd file
 });
 
 app.get('/info', function(request, response) { // Return server info as JSON object
-    var props = getServerProps();
+    var props = getServerProps(true);
     var serverInfo = [];
-    if (props !== null) {
+    if (props !== null && typeof props !== 'undefined') {
+        console.log(props);
         serverInfo.push(props.get('motd')); // message of the day
         serverInfo.push(props.get('server-port')); // server port
         serverInfo.push(props.get('white-list')); // if whitelist is on or off
@@ -569,11 +594,11 @@ app.post('/stopserver', function(request, response) { // Stop server
 
 app.delete('/deletefile', function(request, response) {
     if (checkAPIKey(request.body.apikey) == true) {
-        var item = request.body.file;
-        console.log(item);
-        fs.unlink(item, function(err) {
+        var file = minecraft_home + '/' + request.body.file;
+        console.log(file);
+        fs.unlink(file, function(err) {
             if (err) throw err;
-            console.log(item + " deleted");
+            console.log(file + " deleted");
             response.send("true");
         });
     } else {
@@ -581,11 +606,14 @@ app.delete('/deletefile', function(request, response) {
     }
 });
 
+console.log('starting server');
 app.listen(PORT); // Listen on port defined in properties.json
 
+console.log('setup on exit');
 process.on('exit', function(code) { // When it exits kill the server process too
     serverSpawnProcess.kill(2);
 });
+
 if (typeof serverSpawnProcess != "undefined") {
     serverSpawnProcess.on('exit', function(code) {
         serverStopped == true; // Server process has crashed or stopped
@@ -594,6 +622,8 @@ if (typeof serverSpawnProcess != "undefined") {
         }
     });
 }
+
+console.log('setup error handler');
 process.stdout.on('error', function(err) {
     if (err.code == "EPIPE") {
         process.exit(0);
